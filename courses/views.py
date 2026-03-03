@@ -25,10 +25,10 @@ class CourseListCreateView(generics.ListCreateAPIView):
     serializer_class = CourseSerializer
 
     def get_permissions(self):
-        # Everyone can view list
+        # ✅ Anyone can view course list
         if self.request.method == "GET":
             return [permissions.AllowAny()]
-        # Only instructor can create
+        # ✅ Only instructor can create course
         return [IsAuthenticated(), IsInstructor()]
 
     def perform_create(self, serializer):
@@ -38,7 +38,13 @@ class CourseListCreateView(generics.ListCreateAPIView):
 class CourseDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Course.objects.all()
     serializer_class = CourseSerializer
-    permission_classes = [IsOwnerInstructorOrReadOnly]
+
+    def get_permissions(self):
+        # ✅ Anyone can view course details
+        if self.request.method == "GET":
+            return [permissions.AllowAny()]
+        # ✅ Only owner instructor can update/delete
+        return [IsAuthenticated(), IsOwnerInstructorOrReadOnly()]
 
 
 # =========================
@@ -51,14 +57,16 @@ class LessonListByCourseView(generics.ListCreateAPIView):
         return Lesson.objects.filter(course_id=self.kwargs["course_id"]).order_by("order")
 
     def get_permissions(self):
+        # ✅ Anyone can view lessons list
         if self.request.method == "GET":
             return [permissions.AllowAny()]
+        # ✅ Only instructor can add lessons
         return [IsAuthenticated(), IsInstructor()]
 
     def perform_create(self, serializer):
-        course = Course.objects.get(id=self.kwargs["course_id"])
+        course = get_object_or_404(Course, id=self.kwargs["course_id"])
 
-        # only owner instructor can add lesson
+        # ✅ only owner instructor can add lesson
         if course.instructor != self.request.user:
             raise PermissionDenied("You can only add lessons to your own course.")
 
@@ -68,7 +76,13 @@ class LessonListByCourseView(generics.ListCreateAPIView):
 class LessonDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Lesson.objects.all()
     serializer_class = LessonSerializer
-    permission_classes = [IsAuthenticated, IsInstructor]
+
+    def get_permissions(self):
+        # ✅ Anyone can view single lesson (so video open works)
+        if self.request.method == "GET":
+            return [permissions.AllowAny()]
+        # ✅ Only instructor can update/delete
+        return [IsAuthenticated(), IsInstructor()]
 
     def perform_update(self, serializer):
         lesson = self.get_object()
@@ -94,8 +108,8 @@ class EnrollView(generics.CreateAPIView):
         if not course_id:
             return Response({"course": ["This field is required."]}, status=status.HTTP_400_BAD_REQUEST)
 
-        # only students can enroll
-        if request.user.role != "student":
+        # ✅ only students can enroll
+        if getattr(request.user, "role", None) != "student":
             return Response({"detail": "Only students can enroll."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
@@ -121,8 +135,8 @@ class MarkLessonCompleteView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        # only students
-        if request.user.role != "student":
+        # ✅ only students
+        if getattr(request.user, "role", None) != "student":
             return Response({"detail": "Only students can mark progress."}, status=status.HTTP_403_FORBIDDEN)
 
         lesson_id = request.data.get("lesson")
@@ -131,7 +145,7 @@ class MarkLessonCompleteView(APIView):
 
         lesson = get_object_or_404(Lesson, id=lesson_id)
 
-        # Must be enrolled
+        # ✅ Must be enrolled
         is_enrolled = Enrollment.objects.filter(student=request.user, course=lesson.course).exists()
         if not is_enrolled:
             return Response({"detail": "You must enroll in this course first."}, status=status.HTTP_403_FORBIDDEN)
@@ -156,18 +170,18 @@ class CourseProgressView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, course_id):
-        if request.user.role != "student":
+        # ✅ only students
+        if getattr(request.user, "role", None) != "student":
             return Response({"detail": "Only students can view progress."}, status=status.HTTP_403_FORBIDDEN)
 
         course = get_object_or_404(Course, id=course_id)
 
-        # Must be enrolled
+        # ✅ Must be enrolled
         is_enrolled = Enrollment.objects.filter(student=request.user, course=course).exists()
         if not is_enrolled:
             return Response({"detail": "You must enroll in this course first."}, status=status.HTTP_403_FORBIDDEN)
 
         total_lessons = Lesson.objects.filter(course=course).count()
-
         completed_lessons = LessonProgress.objects.filter(
             student=request.user,
             lesson__course=course,
