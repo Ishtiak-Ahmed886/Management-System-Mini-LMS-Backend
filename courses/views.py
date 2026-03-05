@@ -100,34 +100,84 @@ class LessonDetailView(generics.RetrieveUpdateDestroyAPIView):
 # ✅ Enrollment APIs
 # =========================
 class EnrollView(generics.CreateAPIView):
+    """
+    POST /api/enroll/
+    body: { "course_id": 3 }
+    """
     serializer_class = EnrollmentSerializer
     permission_classes = [IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
-        course_id = request.data.get("course")
+        course_id = request.data.get("course_id")
         if not course_id:
-            return Response({"course": ["This field is required."]}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"course_id": ["This field is required."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # ✅ only students can enroll
         if getattr(request.user, "role", None) != "student":
-            return Response({"detail": "Only students can enroll."}, status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {"detail": "Only students can enroll."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
+        # ✅ course exists check
         try:
-            enrollment = Enrollment.objects.create(student=request.user, course_id=course_id)
-        except IntegrityError:
-            return Response({"detail": "Already enrolled."}, status=status.HTTP_400_BAD_REQUEST)
+            course = Course.objects.get(id=course_id)
+        except Course.DoesNotExist:
+            return Response(
+                {"detail": "Course not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
-        return Response(EnrollmentSerializer(enrollment).data, status=status.HTTP_201_CREATED)
+        # ✅ prevent duplicate enrollment
+        try:
+            enrollment = Enrollment.objects.create(student=request.user, course=course)
+        except IntegrityError:
+            return Response(
+                {"detail": "Already enrolled."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = EnrollmentSerializer(enrollment).data
+
+        # ✅ extra info for frontend (optional but helpful)
+        data["course_title"] = course.title
+        data["course_description"] = course.description
+        data["instructor_username"] = getattr(course.instructor, "username", "")
+
+        return Response(data, status=status.HTTP_201_CREATED)
 
 
 class MyEnrollmentsView(generics.ListAPIView):
+    """
+    GET /api/my-enrollments/
+    returns list with course info so frontend can show title instead of id
+    """
     serializer_class = EnrollmentSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Enrollment.objects.filter(student=self.request.user).order_by("-enrolled_at")
+        return (
+            Enrollment.objects
+            .filter(student=self.request.user)
+            .select_related("course", "course__instructor")
+            .order_by("-enrolled_at")
+        )
 
+    def list(self, request, *args, **kwargs):
+        qs = self.get_queryset()
+        serializer = self.get_serializer(qs, many=True)
+        results = serializer.data
 
+        # ✅ add course info in each row
+        for i, en in enumerate(qs):
+            results[i]["course_title"] = en.course.title
+            results[i]["course_description"] = en.course.description
+            results[i]["instructor_username"] = getattr(en.course.instructor, "username", "")
+
+        return Response(results, status=status.HTTP_200_OK)
 # =========================
 # ✅ Progress APIs
 # =========================

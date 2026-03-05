@@ -19,11 +19,16 @@ class CourseSerializer(serializers.ModelSerializer):
 
 
 class EnrollmentSerializer(serializers.ModelSerializer):
+    course = CourseSerializer(read_only=True)
+    course_id = serializers.PrimaryKeyRelatedField(
+        source="course",
+        queryset=Course.objects.all(),
+        write_only=True
+    )
+
     class Meta:
         model = Enrollment
-        fields = ["id", "student", "course", "enrolled_at"]
-        read_only_fields = ["student", "enrolled_at"]
-
+        fields = ["id", "course", "course_id", "enrolled_at"]
 
 class LessonProgressSerializer(serializers.ModelSerializer):
     class Meta:
